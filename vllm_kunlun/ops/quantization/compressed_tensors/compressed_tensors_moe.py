@@ -18,7 +18,6 @@
 
 from typing import Callable, Optional, Union
 
-import os
 import torch
 from vllm.logger import init_logger
 from compressed_tensors.quantization import ActivationOrdering, QuantizationStrategy
@@ -33,14 +32,8 @@ from vllm.model_executor.layers.quantization.compressed_tensors.compressed_tenso
     find_matched_target,
 )
 from vllm_kunlun.ops._kunlun_ops import KunlunOps as ops
-from vllm_kunlun.ops.quantization.kernels.quant_ops import dequant_int4_kunlun
 
 logger = init_logger(__name__)
-
-# Environment variable to control which MoE implementation to use
-# USE_MOE_FC=1: use apply_moe_fc (original implementation with dequant)
-# USE_MOE_FC=0 or not set: use apply_moe_fc_v3 (optimized implementation)
-USE_MOE_FC = os.environ.get("USE_MOE_FC", "0") == "1"
 
 
 class KunlunCompressedTensorsMoEMethod(FusedMoEMethodBase):
@@ -296,14 +289,7 @@ class KunlunCompressedTensorsW8A8Int8MoEMethod(CompressedTensorsW8A8Int8MoEMetho
 
 class KunlunCompressedTensorsWNA16MoEMethod(CompressedTensorsWNA16MoEMethod):
 
-    def process_weights_after_loading_moe_fc(self, layer: torch.nn.Module) -> None:
-        """Preprocessing for apply_moe_fc: use parent class method.
-
-        This keeps the original uint8 format needed by apply_moe_fc.
-        """
-        super().process_weights_after_loading(layer)
-
-    def process_weights_after_loading_moe_fc_v3(self, layer: torch.nn.Module) -> None:
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
         """Optimized preprocessing for apply_moe_fc_v3.
 
         This method:
@@ -351,74 +337,7 @@ class KunlunCompressedTensorsWNA16MoEMethod(CompressedTensorsWNA16MoEMethod):
             w2_scale_data = w2_scale_data.to(torch.float32)  # type conversion
             layer.w2_weight_scale.data = w2_scale_data  # Direct assignment
 
-    def apply_moe_fc(
-        self,
-        layer: torch.nn.Module,
-        x: torch.Tensor,
-        router_logits: torch.Tensor,
-        top_k: int,
-        renormalize: bool,
-        use_grouped_topk: bool = False,
-        topk_group: Optional[int] = None,
-        num_expert_group: Optional[int] = None,
-        global_num_experts: int = -1,
-        expert_map: Optional[torch.Tensor] = None,
-        custom_routing_function: Optional[Callable] = None,
-        scoring_func: str = "softmax",
-        routed_scaling_factor: float = 1.0,
-        e_score_correction_bias: Optional[torch.Tensor] = None,
-        apply_router_weight_on_input: bool = False,
-        activation: str = "silu",
-        enable_eplb: bool = False,
-        expert_load_view: Optional[torch.Tensor] = None,
-        logical_to_physical_map: Optional[torch.Tensor] = None,
-        logical_replica_count: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
-        """Original implementation using dequant and fused_moe."""
-        # dequant packed weights to float16
-        w13_weight = dequant_int4_kunlun(
-            weight_packed_uint8=layer.w13_weight_packed,
-            scale=self.moe_quant_config.w1_scale,
-        )
-        w2_weight = dequant_int4_kunlun(
-            weight_packed_uint8=layer.w2_weight_packed,
-            scale=self.moe_quant_config.w2_scale,
-        )
-
-        if self.moe.use_ep:
-            return ops.fused_moe_ep(
-                x,
-                w13_weight,
-                w2_weight,
-                router_logits,
-                self.moe.ep_rank,
-                top_k,
-                renormalize=renormalize,
-                inplace=True,
-                use_grouped_topk=use_grouped_topk,
-                num_expert_group=num_expert_group,
-                topk_group=topk_group,
-            )
-        else:
-            return ops.fused_moe(
-                x,
-                w13_weight,
-                w2_weight,
-                router_logits,
-                self.moe.ep_rank,
-                top_k,
-                renormalize=renormalize,
-                inplace=True,
-                use_grouped_topk=use_grouped_topk,
-                num_expert_group=num_expert_group,
-                topk_group=topk_group,
-                scoring_func=scoring_func,
-                e_score_correction_bias=e_score_correction_bias,
-                w1_bias=getattr(layer, "w13_bias", None),
-                w2_bias=getattr(layer, "w2_bias", None),
-            )
-
-    def apply_moe_fc_v3(
+    def apply(
         self,
         layer: torch.nn.Module,
         x: torch.Tensor,
@@ -463,29 +382,6 @@ class KunlunCompressedTensorsWNA16MoEMethod(CompressedTensorsWNA16MoEMethod):
             scoring_func=scoring_func,
             e_score_correction_bias=e_score_correction_bias,
         )
-
-
-# Set methods based on USE_MOE_FC environment variable
-if USE_MOE_FC:
-    KunlunCompressedTensorsWNA16MoEMethod.process_weights_after_loading = (
-        KunlunCompressedTensorsWNA16MoEMethod.process_weights_after_loading_moe_fc
-    )
-    KunlunCompressedTensorsWNA16MoEMethod.apply = (
-        KunlunCompressedTensorsWNA16MoEMethod.apply_moe_fc
-    )
-    print(
-        "USE_MOE_FC=1: Using apply_moe_fc (original implementation with dequant)"
-    )
-else:
-    KunlunCompressedTensorsWNA16MoEMethod.process_weights_after_loading = (
-        KunlunCompressedTensorsWNA16MoEMethod.process_weights_after_loading_moe_fc_v3
-    )
-    KunlunCompressedTensorsWNA16MoEMethod.apply = (
-        KunlunCompressedTensorsWNA16MoEMethod.apply_moe_fc_v3
-    )
-    print(
-        "USE_MOE_FC=0 (default): Using apply_moe_fc_v3 (optimized implementation)"
-    )
 
 
 # monkey patch
