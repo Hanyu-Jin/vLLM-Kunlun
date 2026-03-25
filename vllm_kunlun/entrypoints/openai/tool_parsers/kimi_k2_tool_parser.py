@@ -28,7 +28,6 @@ logger = init_logger(__name__)
 
 class KimiK2ToolParser(ToolParser):
     def __init__(self, tokenizer: AnyTokenizer):
-        print("KimiK2ToolParser")
         super().__init__(tokenizer)
         self.current_tool_name_sent: bool = False
         self.prev_tool_call_arr: list[dict] = []
@@ -154,7 +153,6 @@ class KimiK2ToolParser(ToolParser):
         model_output: str,
         request: ChatCompletionRequest,
     ) -> ExtractedToolCallInformation:
-        print("extract_tool_calls")
         # sanity check; avoid unnecessary processing
         if self.tool_calls_start_token not in model_output:
             return ExtractedToolCallInformation(
@@ -176,6 +174,21 @@ class KimiK2ToolParser(ToolParser):
                     function_id, function_args = match
                     # function_id: functions.get_weather:0 or get_weather:0
                     function_name = function_id.split(":")[0].split(".")[-1]
+
+                    # Validate function name against available tools
+                    if request and hasattr(request, 'tools') and request.tools:
+                        valid_names = {
+                            tool.function.name
+                            for tool in request.tools
+                            if hasattr(tool, "function")
+                        }
+                        if function_name not in valid_names:
+                            logger.warning(
+                                "Tool '%s' not found in available tools, skipping",
+                                function_name,
+                            )
+                            continue  # Skip this tool call
+
                     tool_calls.append(
                         ToolCall(
                             id=function_id,
@@ -209,7 +222,6 @@ class KimiK2ToolParser(ToolParser):
         delta_token_ids: Sequence[int],
         request: ChatCompletionRequest,
     ) -> DeltaMessage | None:
-        print("extract_tool_calls_streaming")
         logger.debug("delta_text: %s", delta_text)
         logger.debug("delta_token_ids: %s", delta_token_ids)
 
@@ -475,6 +487,25 @@ class KimiK2ToolParser(ToolParser):
                     return None
                 function_name: str | None = current_tool_call.get("name")
                 tool_id = current_tool_call.get("id")
+
+                # Validate function name against available tools
+                if request and request.tools:
+                    valid_names = {
+                        tool.function.name
+                        for tool in request.tools
+                        if hasattr(tool, "function")
+                    }
+                    if function_name not in valid_names:
+                        logger.warning(
+                            "Streaming: tool '%s' not found in "
+                            "available tools, skipping",
+                            function_name,
+                        )
+                        # Skip this invoke block entirely
+                        self.current_tool_id += 1
+                        self.current_tool_name_sent = False
+                        return None
+
                 if function_name:
                     self.current_tool_name_sent = True
                     return DeltaMessage(
@@ -601,3 +632,4 @@ class KimiK2ToolParser(ToolParser):
         except Exception:
             logger.exception("Error trying to handle streaming tool call.")
             return None  # do not stream a delta. skip this token ID.
+

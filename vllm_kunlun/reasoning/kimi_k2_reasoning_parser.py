@@ -32,7 +32,6 @@ class KimiK2ReasoningParser(ReasoningParser):
     """
 
     def __init__(self, tokenizer: PreTrainedTokenizerBase, *args, **kwargs):
-        print("KimiK2ReasoningParser")
         super().__init__(tokenizer, *args, **kwargs)
 
         if not self.model_tokenizer:
@@ -71,7 +70,6 @@ class KimiK2ReasoningParser(ReasoningParser):
             )
 
     def is_reasoning_end(self, input_ids: Sequence[int]) -> bool:
-        print("is_reasoning_end")
         """
         Check if the reasoning content ends in the input_ids.
 
@@ -102,7 +100,6 @@ class KimiK2ReasoningParser(ReasoningParser):
     def is_reasoning_end_streaming(
         self, input_ids: Sequence[int], delta_ids: Iterable[int]
     ) -> bool:
-        print("is_reasoning_end_streaming")
         """
         Check if the reasoning content ends in the input_ids on a decode step.
         """
@@ -123,7 +120,6 @@ class KimiK2ReasoningParser(ReasoningParser):
         )
 
     def extract_content_ids(self, input_ids: list[int]) -> list[int]:
-        print("extract_content_ids")
         """
         Extract content token ids from the input_ids.
         """
@@ -157,7 +153,6 @@ class KimiK2ReasoningParser(ReasoningParser):
     def extract_reasoning_content(
         self, model_output: str, request: "ChatCompletionRequest | ResponsesRequest"
     ) -> tuple[str | None, str | None]:
-        print("extract_reasoning")
         """
         Extract reasoning content from the model output.
         """
@@ -197,7 +192,6 @@ class KimiK2ReasoningParser(ReasoningParser):
         current_token_ids: Sequence[int],
         delta_token_ids: Sequence[int],
     ) -> DeltaMessage | None:
-        print("extract_reasoning_streaming")
         """
         Extract reasoning content from a delta message during streaming.
         """
@@ -238,3 +232,4 @@ class KimiK2ReasoningParser(ReasoningParser):
 
         # still reasoning (no end token)
         return DeltaMessage(reasoning=delta_text)
+
